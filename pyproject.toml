@@ -2,17 +2,15 @@
 name = "unlisted"
 version = "0.1.4"
 description = "Find a YouTube channel's unlisted videos"
-authors = ["ramsy0dev"]
+authors = ["thefr0gg"]
 license = "GPL v3.0"
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
-typer = ">=0.20.1,<0.28.0"
 requests = "^2.32.3"
 rich = "^14.3.3"
 user-agent = "^0.1.10"
-py-proxy = "^0.2.6"
 pytube = {git = "https://github.com/ramsy0dev/pytube"}
 
 

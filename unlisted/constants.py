@@ -6,7 +6,7 @@
 # Primary info
 PACKAGE = "unlisted"
 VERSION = "0.1.4"
-AUTHOR = "ramsy0dev"
+AUTHOR = "thefr0gg"
 GITHUB = "https://github.com/ramsy0dev/unlisted"
 
 # Unlisted's banner
@@ -16,7 +16,7 @@ BANNER = f"""[bold white]
     / / \\ \\ '_ \\| | / __| __/ _ \\/ _` |
     \\ \\_/ / | | | | \\__ \\ ||  __/ (_| |
      \\___/|_| |_|_|_|___/\\__\\___|\\__,_| Version [italic cyan]{VERSION}[reset]
-                    made by [bold white]`ramsy0dev[bold white]`[reset]
+                    made by [bold white]`thefr0gg[bold white]`[reset]
 """
 
 def banner() -> None:

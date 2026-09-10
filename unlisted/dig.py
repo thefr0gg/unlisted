@@ -12,19 +12,16 @@ from user_agent import generate_user_agent
 
 from unlisted import constants
 
-from unlisted.proxy_handler import ProxyHandler
-from unlisted.log_msgs import info
-from unlisted.thread_task import ThreadTask
+from unlisted import messages
 
 _CHARS = string.ascii_letters + string.digits + '-'
 
 class Dig(object):
     """ Unlisted videos digger """
 
-    def __init__(self, channel_identifier: str, channel_url: str, proxy_handler: ProxyHandler, threads: int | None = 3, delay: float = 0.5, output_file_path: str | None = None, is_open_search: bool | None = False) -> None:
+    def __init__(self, channel_identifier: str, channel_url: str, threads: int | None = 3, delay: float = 0.5, output_file_path: str | None = None, is_open_search: bool | None = False) -> None:
         self.channel_identifier = channel_identifier
         self.channel_url = channel_url
-        self.proxy_handler = proxy_handler
         self.threads = threads
         self.delay = delay
         self.output_file_path = output_file_path
@@ -60,7 +57,6 @@ class Dig(object):
         response = requests.get(
             self.channel_url,
             headers=headers,
-            proxies=self.proxy_handler.get_random_proxy()
         )
 
         if response.status_code != 200:
@@ -71,10 +67,7 @@ class Dig(object):
     def start(self, console_log) -> None:
         """ Starts the `dig` function in multipule threads """
         if not self.is_open_search:
-            channel = Channel(
-                self.channel_url,
-                proxies=self.proxy_handler.get_random_proxy()
-            )
+            channel = Channel(self.channel_url)
 
             pub_list = self._fetch_public_videos(channel=channel)
             self.public_videos_uid = frozenset(pub_list)
@@ -89,13 +82,14 @@ class Dig(object):
         save_thread = threading.Thread(target=self._periodic_save_loop, daemon=True)
         save_thread.start()
 
-        for _ in range(self.threads):
-            thread_task = ThreadTask(
-                target_function=self.dig,
-                args=(console_log, _)
+        for thread_index in range(self.threads):
+            thread = threading.Thread(
+                target=self.dig,
+                args=(console_log, thread_index),
+                daemon=True,
             )
-            thread_task.start()
-            self.running_threads.append(thread_task)
+            thread.start()
+            self.running_threads.append(thread)
 
     def dig(self, console_log, thread_index: int) -> None:
         """ Digs all the unlisted videos in a channel """
@@ -106,13 +100,11 @@ class Dig(object):
             video_uid = self._generate_video_uid()
             video_url = f"{url}{video_uid}"
 
-            proxies = self.proxy_handler.get_random_proxy()
             headers = {"User-Agent": generate_user_agent()}
 
             try:
                 response = requests.get(
                     f"https://www.youtube.com/oembed?url={video_url}&format=json",
-                    proxies=proxies,
                     headers=headers,
                     timeout=8,
                 )
@@ -139,14 +131,14 @@ class Dig(object):
 
                     if self.channel_name is not None:
                         if video_author == self.channel_name:
-                            console_log(info.FOUND_UNLISTED_VIDEO_FOR_CURRENT_CHANNEL(video_url=video_url, channel_name=self.channel_name, thread_index=thread_index))
+                            console_log(messages.FOUND_UNLISTED_VIDEO_FOR_CURRENT_CHANNEL(video_url=video_url, channel_name=self.channel_name, thread_index=thread_index))
                             with self._state_lock:
                                 self.unlisted_videos.add(video_uid)
                         else:
-                            console_log(info.FOUND_UNLISTED_VIDEO_FOR_OTHER_CHANNEL(video_url=video_url, channel_name=self.channel_name, thread_index=thread_index))
+                            console_log(messages.FOUND_UNLISTED_VIDEO_FOR_OTHER_CHANNEL(video_url=video_url, channel_name=self.channel_name, thread_index=thread_index))
                     elif self.is_open_search:
                         video_data["channel_name"] = video_author
-                        console_log(info.FOUND_UNLISTED_VIDEO_FOR_OTHER_CHANNEL(video_url=video_url, channel_name=video_author, thread_index=thread_index))
+                        console_log(messages.FOUND_UNLISTED_VIDEO_FOR_OTHER_CHANNEL(video_url=video_url, channel_name=video_author, thread_index=thread_index))
                         with self._state_lock:
                             self.unlisted_videos.add(video_uid)
 
@@ -203,19 +195,10 @@ class Dig(object):
         if not self.is_open_search:
             data["channel_name"] = self.channel_name
 
-        if os.path.isfile(self.output_file_path):
-            pass
-        elif self.output_file_path == "./":
-            self.output_file_path = f"./unlisted-dig-results-{self.channel_name if self.channel_name is not None else random.choice([i for i in range(100000, 1000000)])}.json"
-        else:
-            if self.output_file_path.split("/")[-1] == "":
-                self.output_file_path = "/".join(
-                    self.output_file_path.split("/")[:-1]
-                    ) + f"/unlisted-dig-results-{self.channel_name if self.channel_name is not None else random.choice([i for i in range(100000, 1000000)])}.json"
-            else:
-                self.output_file_path = "/".join(
-                    self.output_file_path.split("/")
-                    ) + f"/unlisted-dig-results-{self.channel_name if self.channel_name is not None else random.choice([i for i in range(100000, 1000000)])}.json"
+        if not os.path.isfile(self.output_file_path):
+            suffix = self.channel_name if self.channel_name is not None else random.randint(100000, 999999)
+            filename = f"unlisted-dig-results-{suffix}.json"
+            self.output_file_path = os.path.join(self.output_file_path, filename)
 
         with open(self.output_file_path, "w") as output_file:
             output_file.write(json.dumps(data, indent=4))
@@ -226,6 +209,9 @@ class Dig(object):
             with self._data_lock:
                 snapshot_data = list(self.unlisted_videos_data)
 
+            with self._state_lock:
+                snapshot_used_uids = list(self.used_videos_uid)
+
             try:
                 with open(self.output_file_path, "r") as f:
                     output_file_data = json.load(f)
@@ -235,7 +221,7 @@ class Dig(object):
                     output_file_data["channel_name"] = self.channel_name
 
             output_file_data["unlisted_videos_data"] = snapshot_data
-            output_file_data["used_videos_uid"] = []
+            output_file_data["used_videos_uid"] = snapshot_used_uids
 
             with open(self.output_file_path, "w") as f:
                 f.write(json.dumps(output_file_data, indent=4))

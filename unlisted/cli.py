@@ -2,26 +2,21 @@ import os
 import sys
 import json
 import time
-import typer
+import argparse
 
 from queue import Queue, Empty
 
 from rich import print
-from rich.live import Live
-from rich.panel import Panel
-from rich.table import Table
 from rich.console import Console
+from rich.table import Table
 
 from unlisted import constants
 
-# Log messages
-from unlisted.log_msgs import info, errors
+# Messages
+from unlisted import messages
 
 # Dig
 from unlisted.dig import Dig
-
-# Proxy handler
-from unlisted.proxy_handler import ProxyHandler
 
 # Utils
 from unlisted.utils import (
@@ -29,60 +24,78 @@ from unlisted.utils import (
     channel_url
 )
 
-_SPINNER_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
-def _make_panel(dig: Dig, mode_line: str, elapsed: float, tick: int) -> Panel:
-    spinner = _SPINNER_FRAMES[tick % len(_SPINNER_FRAMES)]
+def _format_elapsed(elapsed: float) -> str:
     h = int(elapsed) // 3600
     m = (int(elapsed) % 3600) // 60
     s = int(elapsed) % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
-    found   = len(dig.unlisted_videos)
-    checked = len(dig.used_videos_uid)
-    failed  = dig.faild_attempts
-    blocked = dig.rate_limited
 
+def _print_summary(console: Console, dig: Dig, elapsed: float) -> None:
     table = Table.grid(padding=(0, 2))
     table.add_column(style="dim", justify="right")
     table.add_column(justify="right")
 
-    table.add_row("found",   f"[bold green]{found:,}[/]")
-    table.add_row("checked", f"[bold yellow]{checked:,}[/]")
-    table.add_row("failed",  f"[bold red]{failed:,}[/]")
-    table.add_row("blocked", f"[dim]{blocked:,}[/]")
+    table.add_row("found",   f"[bold green]{len(dig.unlisted_videos):,}[/]")
+    table.add_row("checked", f"[bold yellow]{len(dig.used_videos_uid):,}[/]")
+    table.add_row("failed",  f"[bold red]{dig.faild_attempts:,}[/]")
+    table.add_row("blocked", f"[dim]{dig.rate_limited:,}[/]")
+    table.add_row("elapsed", f"[dim]{_format_elapsed(elapsed)}[/]")
 
-    header = f"[bold cyan]{spinner}[/]  {mode_line}"
-    footer = f"[dim]elapsed {h:02d}:{m:02d}:{s:02d}  ·  {dig.threads} thread{'s' if dig.threads != 1 else ''}[/]"
-
-    grid = Table.grid(padding=(0, 0))
-    grid.add_column()
-    grid.add_row(header)
-    grid.add_row("")
-    grid.add_row(table)
-    grid.add_row("")
-    grid.add_row(footer)
-
-    return Panel(grid, title="[bold]unlisted[/]", border_style="bright_black", padding=(1, 2))
+    console.print()
+    console.print(table)
 
 
-# init cli
-cli = typer.Typer()
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="unlisted")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-@cli.command()
-def version():
+    subparsers.add_parser("version", help="Unlisted's current version")
+
+    dig_parser = subparsers.add_parser(
+        "dig",
+        help="Digs a channel's unlisted videos, or it can be set to open to dig for all channels",
+    )
+    dig_parser.add_argument(
+        "--channel-identifier", dest="channel_identifier", default=None,
+        help="Channel handle to target",
+    )
+    dig_parser.add_argument(
+        "--open", dest="open_search", action="store_true",
+        help="Dig unlisted videos for all channels",
+    )
+    dig_parser.add_argument(
+        "--threads", type=int, default=3, help="Threads to use",
+    )
+    dig_parser.add_argument(
+        "--delay", type=int, default=500,
+        help="Delay between requests per thread in milliseconds",
+    )
+    dig_parser.add_argument(
+        "--output", dest="output_file_path", default="./",
+        help="Path to a file to save the results in",
+    )
+    dig_parser.add_argument(
+        "--ignore-uids-from-result", dest="ignore_uids_from_result", default=None,
+        help="Ignore used videos UIDs from a result file",
+    )
+
+    return parser
+
+
+def version() -> None:
     """ Unlisted's current version """
     print(f"Version [bold cyan]{constants.VERSION}[bold white]")
 
-@cli.command()
 def dig(
     channel_identifier: str = None,
-    open_search: bool = typer.Option(False, "--open", help="Dig unlisted videos for all channels"),
-    threads: int = typer.Option(3, "--threads", help="Threads to use"),
-    delay: int = typer.Option(500, "--delay", help="Delay between requests per thread in milliseconds"),
-    output_file_path: str = typer.Option("./", "--output", help="Path to a file to save the results in"),
-    ignore_uids_from_result: str = typer.Option(None,
-    "--ignore-uids-from-result", help="Ignore used videos UIDs from a result file")
-):
+    open_search: bool = False,
+    threads: int = 3,
+    delay: int = 500,
+    output_file_path: str = "./",
+    ignore_uids_from_result: str = None,
+) -> None:
     """
     Digs a channel's unlisted videos, or it can be set to open to dig for all channels
     """
@@ -92,25 +105,25 @@ def dig(
     current_channel_url = None
 
     if channel_identifier is None and not open_search:
-        console.log(errors.CHANNEL_IDENTIFIER_REQUIRED)
+        console.log(messages.CHANNEL_IDENTIFIER_REQUIRED)
         sys.exit(1)
 
     if channel_identifier is not None:
         if is_url(text=channel_identifier):
-            console.log(errors.CHANNEL_IDENTIFIER_SHOULD_NOT_BE_A_URL)
+            console.log(messages.CHANNEL_IDENTIFIER_SHOULD_NOT_BE_A_URL)
             sys.exit(1)
 
         current_channel_url = channel_url(channel_name=channel_identifier)
 
     if not os.path.exists(output_file_path):
-        console.log(errors.OUTPUT_FILE_PATH_NOT_FOUND)
+        console.log(messages.OUTPUT_FILE_PATH_NOT_FOUND)
         sys.exit(1)
 
     data = None
 
     if ignore_uids_from_result is not None:
         if not os.path.isfile(ignore_uids_from_result) or not os.path.exists(ignore_uids_from_result):
-            console.log(errors.RESULT_FILE_PATH_NOT_FOUND)
+            console.log(messages.RESULT_FILE_PATH_NOT_FOUND)
             sys.exit(1)
 
         with open(ignore_uids_from_result, "r") as result_file:
@@ -127,7 +140,7 @@ def dig(
 
     for key in regular_result_keys:
         if data is not None and key not in data.keys():
-            console.log(errors.RESULT_FILE_IS_CORRUPTED)
+            console.log(messages.RESULT_FILE_IS_CORRUPTED)
             sys.exit(1)
 
     console_log_msgs = Queue()
@@ -135,57 +148,46 @@ def dig(
     def console_log(log_msg: str):
         console_log_msgs.put(log_msg)
 
-    # --- setup phase ---
-    with console.status(info.FETCHING_AND_VALIDATING_PROXIES) as status:
-        proxy_handler = ProxyHandler()
-        proxy_handler.fetch()
+    dig_obj = Dig(
+        channel_identifier=channel_identifier,
+        channel_url=current_channel_url,
+        threads=threads,
+        delay=delay / 1000,
+        output_file_path=output_file_path,
+        is_open_search=open_search,
+    )
 
-        dig_obj = Dig(
-            channel_identifier=channel_identifier,
-            channel_url=current_channel_url,
-            proxy_handler=proxy_handler,
-            threads=threads,
-            delay=delay / 1000,
-            output_file_path=output_file_path,
-            is_open_search=open_search,
-        )
+    if data is not None:
+        dig_obj.used_videos_uid = list(data["used_videos_uid"])
+        dig_obj._used_set = set(data["used_videos_uid"])
 
-        if data is not None:
-            dig_obj.used_videos_uid = list(data["used_videos_uid"])
-            dig_obj._used_set = set(data["used_videos_uid"])
+    if current_channel_url is not None:
+        console.log(messages.CHECKING_CHANNEL_URL(channel_url=current_channel_url))
 
-        if current_channel_url is not None:
-            status.update(info.CHECKING_CHANNEL_URL(channel_url=current_channel_url))
+        if not dig_obj.check_channel_url():
+            console.log(messages.CHANNEL_URL_IS_NOT_VALID(channel_url=current_channel_url))
+            sys.exit(1)
 
-            if not dig_obj.check_channel_url():
-                console.log(info.CHANNEL_URL_IS_NOT_VALID(channel_url=current_channel_url))
-                sys.exit(1)
+    if not open_search:
+        mode_line = f"[white]digging[/]  [bold green]{channel_identifier}[/]  [dim]|[/]  {threads} thread{'s' if threads != 1 else ''}"
+    else:
+        mode_line = f"[white]digging[/]  [bold green]all channels[/]  [dim]|[/]  {threads} thread{'s' if threads != 1 else ''}"
 
-        if not open_search:
-            mode_line = f"[white]digging[/]  [bold green]{channel_identifier}[/]"
-        else:
-            mode_line = "[white]digging[/]  [bold green]all channels[/]"
+    console.print(mode_line)
 
-        dig_obj.start(console_log=console_log)
+    dig_obj.start(console_log=console_log)
 
-    # --- live dashboard ---
+    # --- streaming output ---
     start_time = time.time()
-    tick = 0
 
-    with Live(console=console, refresh_per_second=10, transient=False) as live:
+    try:
         while not dig_obj.exit_flag.is_set():
-            while True:
-                try:
-                    live.console.log(console_log_msgs.get_nowait())
-                except Empty:
-                    break
-
-            live.update(_make_panel(dig_obj, mode_line, time.time() - start_time, tick))
-            tick += 1
-            time.sleep(0.1)
-
-        # render final state
-        live.update(_make_panel(dig_obj, mode_line, time.time() - start_time, tick))
+            try:
+                console.log(console_log_msgs.get(timeout=0.2))
+            except Empty:
+                continue
+    except KeyboardInterrupt:
+        dig_obj.exit_flag.set()
 
     # drain any remaining log messages
     while True:
@@ -194,12 +196,27 @@ def dig(
         except Empty:
             break
 
+    _print_summary(console, dig_obj, time.time() - start_time)
     console.log(f"[bold green][ ! ] [bold white]results saved to [bold yellow]'{dig_obj.output_file_path}'[/]")
 
 def run():
     """ Runs Unlisted """
     constants.banner()
-    cli()
+
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if args.command == "version":
+        version()
+    elif args.command == "dig":
+        dig(
+            channel_identifier=args.channel_identifier,
+            open_search=args.open_search,
+            threads=args.threads,
+            delay=args.delay,
+            output_file_path=args.output_file_path,
+            ignore_uids_from_result=args.ignore_uids_from_result,
+        )
 
 if __name__ == "__main__":
     run()
