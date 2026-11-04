@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import socket
 import typer
 
 from queue import Queue, Empty
@@ -198,6 +199,10 @@ def dig(
 
 def run():
     """ Runs Unlisted """
+    # pyt reads channel pages with urlopen and no timeout; this keeps a dead
+    # connection from hanging the whole run.
+    socket.setdefaulttimeout(15)
+
     constants.banner()
     cli()
 

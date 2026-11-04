@@ -4,6 +4,7 @@ import json
 import random
 import signal
 import string
+import time
 import requests
 import threading
 
@@ -57,30 +58,55 @@ class Dig(object):
 
         headers = {"User-Agent": generate_user_agent()}
 
-        response = requests.get(
-            self.channel_url,
-            headers=headers,
-            proxies=self.proxy_handler.get_random_proxy()
-        )
+        try:
+            response = requests.get(
+                self.channel_url,
+                headers=headers,
+                proxies=self.proxy_handler.get_random_proxy(),
+                timeout=8,
+            )
+            if response.status_code == 200:
+                return True
+        except requests.RequestException:
+            pass
 
-        if response.status_code != 200:
+        # Public proxies are unreliable, so fall back to a direct request.
+        try:
+            response = requests.get(self.channel_url, headers=headers, timeout=10)
+        except requests.RequestException:
             return False
 
-        return True
+        return response.status_code == 200
+
+    def _load_channel(self) -> Channel:
+        """ Loads the channel, retrying on transient network errors """
+        last_error = None
+
+        for _ in range(3):
+            try:
+                channel = Channel(self.channel_url)
+                self.channel_name = self._channel_author(channel=channel)
+                return channel
+            except Exception as error:
+                last_error = error
+                time.sleep(1)
+
+        raise last_error
 
     def start(self, console_log) -> None:
         """ Starts the `dig` function in multipule threads """
         if not self.is_open_search:
-            channel = Channel(
-                self.channel_url,
-                proxies=self.proxy_handler.get_random_proxy()
-            )
+            channel = self._load_channel()
 
-            pub_list = self._fetch_public_videos(channel=channel)
+            try:
+                pub_list = self._fetch_public_videos(channel=channel)
+            except Exception:
+                # The public list is only used to skip already-public videos.
+                # A truncated response here should not abort the dig.
+                pub_list = []
+
             self.public_videos_uid = frozenset(pub_list)
             self._used_set.update(pub_list)
-
-            self.channel_name = self._channel_author(channel=channel)
 
         signal.signal(signal.SIGINT, self._signal_handler)
 
