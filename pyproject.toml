@@ -13,11 +13,11 @@ requests = "^2.32.3"
 rich = "^14.3.3"
 user-agent = "^0.1.10"
 py-proxy = "^0.2.6"
-pytube = {git = "https://github.com/ramsy0dev/pytube"}
+pyt = {git = "https://github.com/ramsy0dev/pyt", tag = "v2.1.0"}
 
 
-[tool.poetry.plugins."console_scripts"]
-unlisted = "unlisted:cli.run"
+[tool.poetry.scripts]
+unlisted = "unlisted.cli:run"
 
 [build-system]
 requires = ["poetry-core"]

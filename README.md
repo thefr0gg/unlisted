@@ -9,15 +9,21 @@ YouTube video IDs are 11 characters from `[a-zA-Z0-9_-]`. unlisted brute-forces 
 ## requirements
 
 - python 3.10+
-- [poetry](https://python-poetry.org)
 
 ## install
 
 ```bash
-git clone https://github.com/ramsy0dev/unlisted
+git clone https://github.com/thefr0gg/unlisted
 cd unlisted
-poetry build
-pip install ./dist/unlisted-*.tar.gz
+python -m venv .venv
+source .venv/bin/activate
+pip install .
+```
+
+or, if you use [pipx](https://pipx.pypa.io):
+
+```bash
+pipx install git+https://github.com/thefr0gg/unlisted
 ```
 
 ## usage

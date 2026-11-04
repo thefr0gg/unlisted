@@ -7,7 +7,7 @@ import string
 import requests
 import threading
 
-from pytube import Channel
+from pyt.legacy import Channel
 from user_agent import generate_user_agent
 
 from unlisted import constants
