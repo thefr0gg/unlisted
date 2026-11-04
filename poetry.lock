@@ -433,7 +433,7 @@ mutagen = ">=1.47.0"
 
 [package.source]
 type = "git"
-url = "https://github.com/ramsy0dev/pyt"
+url = "https://github.com/thefr0gg/pyt"
 reference = "v2.1.0"
 resolved_reference = "c3daaa58104332319abad47e7022228affcabe1e"
 
@@ -650,4 +650,4 @@ tests = ["pytest"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "c9720952ddd5d2212d46e6a73537293a93c3b8e1e3c60b2f2cb313c15e422adb"
+content-hash = "ce9a712fb3e82d149f2343c243801ebfdf7abe1eab4f9662067275ee0e6ec018"
