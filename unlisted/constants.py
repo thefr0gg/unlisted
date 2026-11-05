@@ -7,7 +7,7 @@
 PACKAGE = "unlisted"
 VERSION = "0.1.4"
 AUTHOR = "thefr0gg"
-GITHUB = "https://github.com/ramsy0dev/unlisted"
+GITHUB = "https://github.com/thefr0gg/unlisted"
 
 # Unlisted's banner
 BANNER = f"""[bold white]
@@ -15,8 +15,7 @@ BANNER = f"""[bold white]
      /\\ /\\ _ __ | (_)___| |_ ___  __| |
     / / \\ \\ '_ \\| | / __| __/ _ \\/ _` |
     \\ \\_/ / | | | | \\__ \\ ||  __/ (_| |
-     \\___/|_| |_|_|_|___/\\__\\___|\\__,_| Version [italic cyan]{VERSION}[reset]
-                    made by [bold white]`thefr0gg[bold white]`[reset]
+     \\___/|_| |_|_|_|___/\\__\\___|\\__,_|[reset]
 """
 
 def banner() -> None:

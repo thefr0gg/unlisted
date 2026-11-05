@@ -3,7 +3,7 @@ name = "unlisted"
 version = "0.1.4"
 description = "Find a YouTube channel's unlisted videos"
 authors = ["thefr0gg"]
-license = "GPL v3.0"
+license = "GPL-3.0-only"
 readme = "README.md"
 
 [tool.poetry.dependencies]
@@ -11,8 +11,11 @@ python = ">=3.10,<4.0"
 requests = "^2.32.3"
 rich = "^14.3.3"
 user-agent = "^0.1.10"
-pytube = {git = "https://github.com/ramsy0dev/pytube"}
+pyt = {git = "https://github.com/thefr0gg/pyt", rev = "443c12c9b069f26a942add1500ff135df991a6de"}
 
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
 
 [tool.poetry.plugins."console_scripts"]
 unlisted = "unlisted:cli.run"

@@ -38,13 +38,20 @@ def _print_summary(console: Console, dig: Dig, elapsed: float) -> None:
     table.add_column(justify="right")
 
     table.add_row("found",   f"[bold green]{len(dig.unlisted_videos):,}[/]")
-    table.add_row("checked", f"[bold yellow]{len(dig.used_videos_uid):,}[/]")
+    table.add_row("checked", f"[bold yellow]{dig.checked:,}[/]")
     table.add_row("failed",  f"[bold red]{dig.faild_attempts:,}[/]")
     table.add_row("blocked", f"[dim]{dig.rate_limited:,}[/]")
     table.add_row("elapsed", f"[dim]{_format_elapsed(elapsed)}[/]")
 
     console.print()
     console.print(table)
+
+
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return number
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -66,7 +73,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Dig unlisted videos for all channels",
     )
     dig_parser.add_argument(
-        "--threads", type=int, default=3, help="Threads to use",
+        "--threads", type=_positive_int, default=3, help="Threads to use",
     )
     dig_parser.add_argument(
         "--delay", type=int, default=500,
@@ -113,6 +120,7 @@ def dig(
             console.log(messages.CHANNEL_IDENTIFIER_SHOULD_NOT_BE_A_URL)
             sys.exit(1)
 
+        channel_identifier = channel_identifier.lstrip("@")
         current_channel_url = channel_url(channel_name=channel_identifier)
 
     if not os.path.exists(output_file_path):
@@ -158,8 +166,7 @@ def dig(
     )
 
     if data is not None:
-        dig_obj.used_videos_uid = list(data["used_videos_uid"])
-        dig_obj._used_set = set(data["used_videos_uid"])
+        dig_obj.load_previous(data)
 
     if current_channel_url is not None:
         console.log(messages.CHECKING_CHANNEL_URL(channel_url=current_channel_url))
@@ -188,6 +195,9 @@ def dig(
                 continue
     except KeyboardInterrupt:
         dig_obj.exit_flag.set()
+
+    console.log("stopping workers and saving results...")
+    dig_obj.stop()
 
     # drain any remaining log messages
     while True:

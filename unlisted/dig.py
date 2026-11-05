@@ -7,14 +7,18 @@ import string
 import requests
 import threading
 
-from pytube import Channel
+from pyt import Client, ChannelFeed
 from user_agent import generate_user_agent
 
 from unlisted import constants
 
 from unlisted import messages
 
-_CHARS = string.ascii_letters + string.digits + '-'
+_CHARS = string.ascii_letters + string.digits + '-_'
+
+# An 11-char ID encodes 64 bits (10*6 + 4), so the last char only ever takes
+# 16 values: those whose low two bits are zero.
+_LAST_CHARS = ''.join(c for i, c in enumerate(string.ascii_uppercase + string.ascii_lowercase + string.digits + '-_') if i % 4 == 0)
 
 class Dig(object):
     """ Unlisted videos digger """
@@ -34,6 +38,7 @@ class Dig(object):
         self.unlisted_videos_data: list = []
         self.channel_name: str | None = None
         self.faild_attempts: int = 0
+        self.checked: int = 0
         self.rate_limited: int = 0
 
         self._state_lock = threading.Lock()
@@ -42,6 +47,12 @@ class Dig(object):
 
         self.running_threads: list = []
         self.exit_flag = threading.Event()
+
+    def load_previous(self, data: dict) -> None:
+        """ Restores state from a previous result file """
+        self.used_videos_uid = list(data["used_videos_uid"])
+        self._used_set = set(self.used_videos_uid)
+        self.unlisted_videos_data = list(data["unlisted_videos_data"])
 
     def check_channel_url(self) -> bool:
         """ Checks if the `channel_url` exists """
@@ -54,26 +65,37 @@ class Dig(object):
 
         headers = {"User-Agent": generate_user_agent()}
 
-        response = requests.get(
-            self.channel_url,
-            headers=headers,
-        )
-
-        if response.status_code != 200:
+        try:
+            response = requests.get(
+                self.channel_url,
+                headers=headers,
+                timeout=10,
+            )
+        except requests.RequestException:
             return False
 
-        return True
+        return response.status_code == 200
 
     def start(self, console_log) -> None:
         """ Starts the `dig` function in multipule threads """
         if not self.is_open_search:
-            channel = Channel(self.channel_url)
+            channel = Client().channel(self.channel_url)
 
             pub_list = self._fetch_public_videos(channel=channel)
             self.public_videos_uid = frozenset(pub_list)
-            self._used_set.update(pub_list)
+
+            with self._state_lock:
+                for uid in pub_list:
+                    if uid not in self._used_set:
+                        self._used_set.add(uid)
+                        self.used_videos_uid.append(uid)
 
             self.channel_name = self._channel_author(channel=channel)
+
+        # Rebuild the "found" set from a resumed result file.
+        for entry in self.unlisted_videos_data:
+            if self.is_open_search or entry.get("channel_name") == self.channel_name:
+                self.unlisted_videos.add(entry["video_uid"])
 
         signal.signal(signal.SIGINT, self._signal_handler)
 
@@ -118,6 +140,9 @@ class Dig(object):
 
                 backoff = 1.0
 
+                with self._state_lock:
+                    self.checked += 1
+
                 if response.status_code == 200:
                     oembed = response.json()
                     video_title = oembed.get("title", "")
@@ -127,6 +152,7 @@ class Dig(object):
                         "video_uid": video_uid,
                         "video_url": video_url,
                         "video_title": video_title,
+                        "channel_name": video_author,
                     }
 
                     if self.channel_name is not None:
@@ -135,9 +161,8 @@ class Dig(object):
                             with self._state_lock:
                                 self.unlisted_videos.add(video_uid)
                         else:
-                            console_log(messages.FOUND_UNLISTED_VIDEO_FOR_OTHER_CHANNEL(video_url=video_url, channel_name=self.channel_name, thread_index=thread_index))
+                            console_log(messages.FOUND_UNLISTED_VIDEO_FOR_OTHER_CHANNEL(video_url=video_url, channel_name=video_author, thread_index=thread_index))
                     elif self.is_open_search:
-                        video_data["channel_name"] = video_author
                         console_log(messages.FOUND_UNLISTED_VIDEO_FOR_OTHER_CHANNEL(video_url=video_url, channel_name=video_author, thread_index=thread_index))
                         with self._state_lock:
                             self.unlisted_videos.add(video_uid)
@@ -155,7 +180,7 @@ class Dig(object):
             if self.delay > 0:
                 self.exit_flag.wait(timeout=self.delay)
 
-    def _fetch_public_videos(self, channel: Channel) -> list[str]:
+    def _fetch_public_videos(self, channel: ChannelFeed) -> list[str]:
         """ Fetchs the channel's public videos urls """
         videos_uid = []
         public_videos_urls = channel.video_urls
@@ -168,20 +193,26 @@ class Dig(object):
 
     def _signal_handler(self, sig, frame):
         self.exit_flag.set()
+
+    def stop(self) -> None:
+        """ Stops the workers, waits for in-flight requests, then saves """
+        self.exit_flag.set()
+
+        for thread in self.running_threads:
+            thread.join(timeout=10)
+
         self._save_results()
 
-    def _channel_author(self, channel: Channel) -> str:
+    def _channel_author(self, channel: ChannelFeed) -> str:
         """ Gets the channel author """
-        return channel.channel_name
+        return channel.name
 
     def _generate_video_uid(self) -> str:
         """ Generates a random 11-character video UID """
         while True:
-            candidate = ''.join(random.choices(_CHARS, k=11))
+            candidate = ''.join(random.choices(_CHARS, k=10)) + random.choice(_LAST_CHARS)
             with self._state_lock:
                 if candidate not in self._used_set:
-                    self._used_set.add(candidate)
-                    self.used_videos_uid.append(candidate)
                     return candidate
 
     def _periodic_save_loop(self) -> None:
@@ -189,19 +220,14 @@ class Dig(object):
             self._save_results()
 
     def _initiate_file_output(self) -> None:
-        """ Save the primary template into an output file """
-        data = dict(constants.UNLISTED_VIDEOS_DATA)
-
-        if not self.is_open_search:
-            data["channel_name"] = self.channel_name
-
+        """ Resolves the output file path and writes the initial state """
         if not os.path.isfile(self.output_file_path):
             suffix = self.channel_name if self.channel_name is not None else random.randint(100000, 999999)
+            suffix = re.sub(r"[^\w.-]", "_", str(suffix))
             filename = f"unlisted-dig-results-{suffix}.json"
             self.output_file_path = os.path.join(self.output_file_path, filename)
 
-        with open(self.output_file_path, "w") as output_file:
-            output_file.write(json.dumps(data, indent=4))
+        self._save_results()
 
     def _save_results(self) -> None:
         """ Saves the results into the `self.output_file_path` """
@@ -212,16 +238,14 @@ class Dig(object):
             with self._state_lock:
                 snapshot_used_uids = list(self.used_videos_uid)
 
-            try:
-                with open(self.output_file_path, "r") as f:
-                    output_file_data = json.load(f)
-            except (OSError, json.JSONDecodeError):
-                output_file_data = dict(constants.UNLISTED_VIDEOS_DATA)
-                if not self.is_open_search:
-                    output_file_data["channel_name"] = self.channel_name
+            output_file_data = dict(constants.UNLISTED_VIDEOS_DATA)
+            if not self.is_open_search:
+                output_file_data["channel_name"] = self.channel_name
 
             output_file_data["unlisted_videos_data"] = snapshot_data
             output_file_data["used_videos_uid"] = snapshot_used_uids
 
-            with open(self.output_file_path, "w") as f:
-                f.write(json.dumps(output_file_data, indent=4))
+            tmp_path = f"{self.output_file_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(output_file_data, indent=4, ensure_ascii=False))
+            os.replace(tmp_path, self.output_file_path)
