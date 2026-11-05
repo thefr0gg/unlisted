@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "unlisted"
-version = "0.1.4"
+version = "0.2.0"
 description = "Find a YouTube channel's unlisted videos"
 authors = ["thefr0gg"]
 license = "GPL-3.0-only"
