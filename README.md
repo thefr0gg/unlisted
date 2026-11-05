@@ -56,6 +56,7 @@ pass the result file from a previous run and it'll carry over the videos already
 | `--open` | search across all channels | false |
 | `--threads` | number of worker threads | 3 |
 | `--delay` | ms between requests per thread (helps avoid IP blocks) | 500 |
+| `--status-interval` | seconds between progress lines (0 disables) | 10 |
 | `--output` | path to save the result file | `./` |
 | `--ignore-uids-from-result` | result file to resume from | — |
 

@@ -54,6 +54,18 @@ def _positive_int(value: str) -> int:
     return number
 
 
+def _status_line(dig: Dig, rate: float, elapsed: float) -> str:
+    return (
+        f""
+        f"[bold yellow]{dig.checked:,}[/] checked  "
+        f"[bold green]{len(dig.unlisted_videos):,}[/] found  "
+        f"[bold red]{dig.faild_attempts:,}[/] failed  "
+        f"[dim]{dig.rate_limited:,} blocked[/]  "
+        f"[bold]{rate:,.1f}[/] req/s  "
+        f"[dim]{_format_elapsed(elapsed)}[/]"
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="unlisted")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -80,6 +92,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Delay between requests per thread in milliseconds",
     )
     dig_parser.add_argument(
+        "--status-interval", dest="status_interval", type=int, default=10,
+        help="Seconds between status lines (0 disables)",
+    )
+    dig_parser.add_argument(
         "--output", dest="output_file_path", default="./",
         help="Path to a file to save the results in",
     )
@@ -102,12 +118,14 @@ def dig(
     delay: int = 500,
     output_file_path: str = "./",
     ignore_uids_from_result: str = None,
+    status_interval: int = 10,
 ) -> None:
     """
     Digs a channel's unlisted videos, or it can be set to open to dig for all channels
     """
     console = Console()
     console._log_render.omit_repeated_times = False
+    console._log_render.show_path = False
 
     current_channel_url = None
 
@@ -180,19 +198,32 @@ def dig(
     else:
         mode_line = f"[white]digging[/]  [bold green]all channels[/]  [dim]|[/]  {threads} thread{'s' if threads != 1 else ''}"
 
+    mode_line += f"  [dim]|[/]  {delay} ms delay"
+    if data is not None:
+        mode_line += f"  [dim]|[/]  resumed {len(data['unlisted_videos_data']):,} found"
+
     console.print(mode_line)
 
     dig_obj.start(console_log=console_log)
 
     # --- streaming output ---
     start_time = time.time()
+    last_status_time = start_time
+    last_status_checked = 0
 
     try:
         while not dig_obj.exit_flag.is_set():
             try:
                 console.log(console_log_msgs.get(timeout=0.2))
             except Empty:
-                continue
+                pass
+
+            now = time.time()
+            if status_interval > 0 and now - last_status_time >= status_interval:
+                rate = (dig_obj.checked - last_status_checked) / (now - last_status_time)
+                console.log(_status_line(dig_obj, rate, now - start_time))
+                last_status_time = now
+                last_status_checked = dig_obj.checked
     except KeyboardInterrupt:
         dig_obj.exit_flag.set()
 
@@ -226,6 +257,7 @@ def run():
             delay=args.delay,
             output_file_path=args.output_file_path,
             ignore_uids_from_result=args.ignore_uids_from_result,
+            status_interval=args.status_interval,
         )
 
 if __name__ == "__main__":
