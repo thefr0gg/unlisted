@@ -15,7 +15,7 @@ pyt = {git = "https://github.com/thefr0gg/pyt", rev = "443c12c9b069f26a942add150
 
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0"
+pytest = ">=8,<10"
 
 [tool.poetry.plugins."console_scripts"]
 unlisted = "unlisted:cli.run"
